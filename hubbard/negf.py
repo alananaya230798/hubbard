@@ -211,7 +211,7 @@ class NEGF:
                             # And for each point in the Neq CC
                             self._cc_neq_SE[spin][ik][ic][i] = se.self_energy(cc, k=k, **kw)
 
-    def calc_n_open(self, H, q, qtol=1e-5, a=1.):
+    def calc_n_open(self, H, q, qtol=1e-5, method='residual', gamma=1.0,lambda_tf=1.4,mixing=None,alpha=0.2):
         """
         Method to compute the spin densities from the non-equilibrium Green's function
 
@@ -224,7 +224,11 @@ class NEGF:
         qtol: float, optional
             tolerance to which the charge is going to be converged in the internal loop
             that finds the potential of the device (i.e. that makes the device neutrally charged)
-
+        method: str
+            model in which the charge will be calculated. The options are residual 'residual' or thomas fermi 'tf'
+        
+        Thomas Fermi wavelength from https://arxiv.org/pdf/1010.0508 1.42 Å
+        Appl. Phys. Lett. 92, 123110 (2008)                          7.4  Å
         Returns
         -------
         ni: numpy.ndarray
@@ -373,7 +377,30 @@ class NEGF:
             q_eq = self.H_eq.n.sum(axis=0)
             dq = (q_neq - q_eq)[self.a_dev]
             E = self.H.TBHam.tocsr(spin).diagonal()[self.a_dev]
-            self.H.TBHam[self.a_dev, self.a_dev] = E + a * dq
+
+            # modified by alan
+            if method == 'residual':
+                self.H.TBHam[self.a_dev, self.a_dev] = E + gamma * dq
+            
+            if method == 'tf':
+                #loop over atoms in the device
+            	for i,atoms_i in enumerate(self.a_dev): 
+            	    dV = 0
+            	    for j ,atoms_j in enumerate(self.a_dev):
+            	    	if atoms_i != atoms_j:
+            	    		rij =self.H.TBHam.geometry.rij(atoms_i,atoms_j)
+            	    		Kij = (14.4/rij)*np.exp(-rij/lambda_tf) # factor if  1/(4πε0) in eV/Å
+            	    		# for debugging
+            	    		#print(rij,atoms_i,atoms_j,Kij,dq[j])
+            	    		dV += Kij*dq[j]
+            	    print(atoms_i,dV,'hola')
+            	    if mixing == None:
+            	    	self.H.TBHam[atoms_i,atoms_i] += dV
+            	    if mixing == 'damped':
+            	    	V_old = self.H.TBHam[atoms_i,atoms_i] 
+            	    	self.H.TBHam[atoms_i,i] = (1.0-alpha)*V_old + alpha*(V_old + d*V)
+ 
+
         # Return spin densities and total energy, if the Hamiltonian is not spin-polarized
         # multiply Etot by 2 for spin degeneracy
         return ni, (2./H.spin_size)*Etot
